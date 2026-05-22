@@ -5,6 +5,10 @@ struct PoolsTab: View {
     @Query(sort: \Pool.createdAt, order: .reverse) private var pools: [Pool]
     @Environment(\.modelContext) private var modelContext
     @State private var showCreate = false
+    #if DEBUG
+    @State private var seedError: String?
+    @State private var showSeedError = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -33,16 +37,40 @@ struct PoolsTab: View {
                         Label("Add Pool", systemImage: "plus")
                     }
                 }
+                #if DEBUG
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Seed WC26", action: seedWorldCup)
+                        .font(.caption)
+                }
+                #endif
             }
             .sheet(isPresented: $showCreate) {
                 CreatePoolView()
             }
+            #if DEBUG
+            .alert("Seed failed", isPresented: $showSeedError) {
+                Button("OK") {}
+            } message: {
+                Text(seedError ?? "Unknown error")
+            }
+            #endif
         }
     }
 
     private func delete(at offsets: IndexSet) {
         for index in offsets { modelContext.delete(pools[index]) }
     }
+
+    #if DEBUG
+    private func seedWorldCup() {
+        do {
+            try SeedService.seedWorldCup(context: modelContext)
+        } catch {
+            seedError = error.localizedDescription
+            showSeedError = true
+        }
+    }
+    #endif
 }
 
 struct PoolRow: View {
