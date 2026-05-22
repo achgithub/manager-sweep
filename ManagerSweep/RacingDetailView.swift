@@ -13,31 +13,43 @@ struct RacingDetailView: View {
 
     var body: some View {
         List {
-            if pool.status == .setup {
-                Section("Add runner") {
-                    HStack {
-                        TextField("Runner name", text: $newRunnerName)
-                            .focused($fieldFocused)
-                            .onSubmit(addRunner)
-                        Button("Add", action: addRunner)
-                            .disabled(newRunnerName.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-            }
+            addSection
+            runnersSection
+        }
+        .listStyle(.insetGrouped)
+    }
 
-            Section("Runners (\(pool.runners.count))") {
-                if pool.runners.isEmpty {
-                    Text("No runners yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(sortedRunners) { runner in
-                        RunnerRow(runner: runner, isEditable: pool.status != .complete)
-                    }
-                    .onDelete(perform: pool.status == .setup ? deleteRunners : nil)
+    @ViewBuilder
+    private var addSection: some View {
+        if pool.status == .setup {
+            Section("Add runner") {
+                HStack {
+                    TextField("Runner name", text: $newRunnerName)
+                        .focused($fieldFocused)
+                        .onSubmit(addRunner)
+                    Button("Add", action: addRunner)
+                        .disabled(newRunnerName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
-        .listStyle(.insetGrouped)
+    }
+
+    @ViewBuilder
+    private var runnersSection: some View {
+        Section("Runners (\(pool.runners.count))") {
+            if pool.runners.isEmpty {
+                Text("No runners yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(sortedRunners) { runner in
+                    RunnerRow(runner: runner, isEditable: pool.status != .complete)
+                }
+                .onDelete { offsets in
+                    guard pool.status == .setup else { return }
+                    deleteRunners(at: offsets)
+                }
+            }
+        }
     }
 
     private func addRunner() {
@@ -62,33 +74,47 @@ struct RunnerRow: View {
     @Bindable var runner: Runner
     let isEditable: Bool
 
+    private var positionLabel: String {
+        guard let pos = runner.finishingPosition else { return "No result" }
+        return "Pos: \(pos)"
+    }
+
+    private var positionBinding: Binding<Int> {
+        Binding(
+            get: { runner.finishingPosition ?? 0 },
+            set: { runner.finishingPosition = $0 > 0 ? $0 : nil }
+        )
+    }
+
     var body: some View {
         HStack {
             Text(runner.name)
             Spacer()
             if isEditable {
-                Stepper(
-                    runner.finishingPosition.map { "Pos: \($0)" } ?? "No result",
-                    value: Binding(
-                        get: { runner.finishingPosition ?? 0 },
-                        set: { runner.finishingPosition = $0 > 0 ? $0 : nil }
-                    ),
-                    in: 0...99
-                )
-                .labelsHidden()
-                if let pos = runner.finishingPosition {
-                    Text("#\(pos)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 30)
-                }
+                editableTrailing
             } else {
-                if let pos = runner.finishingPosition {
-                    Text("#\(pos)")
-                        .font(.subheadline.monospacedDigit().bold())
-                        .foregroundStyle(.primary)
-                }
+                readOnlyTrailing
             }
+        }
+    }
+
+    @ViewBuilder
+    private var editableTrailing: some View {
+        Stepper(positionLabel, value: positionBinding, in: 0...99)
+            .labelsHidden()
+        if let pos = runner.finishingPosition {
+            Text("#\(pos)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 30)
+        }
+    }
+
+    @ViewBuilder
+    private var readOnlyTrailing: some View {
+        if let pos = runner.finishingPosition {
+            Text("#\(pos)")
+                .font(.subheadline.monospacedDigit().bold())
         }
     }
 }

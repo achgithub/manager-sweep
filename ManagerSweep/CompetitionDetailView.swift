@@ -43,42 +43,61 @@ struct CompetitionDetailView: View {
 struct OverviewTab: View {
     let competition: Competition
 
+    private var drawn: Int { competition.drawnCount }
+    private var total: Int { competition.entries.count }
+    private var sortedPositions: [PrizePosition] {
+        competition.prizePositions.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     var body: some View {
         List {
-            Section {
-                LabeledContent("Pool", value: competition.pool?.name ?? "—")
-                LabeledContent("Type", value: competition.pool?.type.displayName ?? "—")
-                LabeledContent("Status", value: competition.status.displayName)
-            }
-            Section("Progress") {
-                let drawn = competition.drawnCount
-                let total = competition.entries.count
-                if total > 0 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ProgressView(value: Double(drawn), total: Double(total))
-                            .tint(drawn == total ? .green : .blue)
-                        Text("\(drawn) of \(total) entries drawn")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                } else {
-                    Text("No entries yet.")
+            infoSection
+            progressSection
+            prizeSection
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    @ViewBuilder
+    private var infoSection: some View {
+        Section {
+            LabeledContent("Pool", value: competition.pool?.name ?? "—")
+            LabeledContent("Type", value: competition.pool?.type.displayName ?? "—")
+            LabeledContent("Status", value: competition.status.displayName)
+        }
+    }
+
+    @ViewBuilder
+    private var progressSection: some View {
+        Section("Progress") {
+            if total > 0 {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView(value: Double(drawn), total: Double(total))
+                        .tint(drawn == total ? .green : .blue)
+                    Text("\(drawn) of \(total) entries drawn")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .padding(.vertical, 4)
+            } else {
+                Text("No entries yet.")
+                    .foregroundStyle(.secondary)
             }
-            Section("Prize Positions") {
-                let sorted = competition.prizePositions.sorted { $0.sortOrder < $1.sortOrder }
-                if sorted.isEmpty {
-                    Text("No prize positions.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(sorted) { pos in
-                        Text(pos.label)
-                    }
+        }
+    }
+
+    @ViewBuilder
+    private var prizeSection: some View {
+        Section("Prize Positions") {
+            if sortedPositions.isEmpty {
+                Text("No prize positions.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(sortedPositions) { pos in
+                    Text(pos.label)
                 }
             }
         }
-        .listStyle(.insetGrouped)
     }
 }
 
@@ -96,34 +115,8 @@ struct EntriesTab: View {
 
     var body: some View {
         List {
-            Section("Entries (\(competition.entries.count))") {
-                if competition.entries.isEmpty {
-                    Text("No entries.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(sortedEntries) { entry in
-                        HStack {
-                            Text(entry.playerName)
-                            Spacer()
-                            if let assigned = entry.assignedName {
-                                Text(assigned)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if entry.isDrawn {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .onDelete(perform: competition.status == .setup ? removeEntries : nil)
-                }
-            }
-            if competition.status == .setup {
-                Section {
-                    Button("Add players…") { showAddPlayer = true }
-                }
-            }
+            entriesSection
+            addSection
         }
         .listStyle(.insetGrouped)
         .sheet(isPresented: $showAddPlayer) {
@@ -131,10 +124,57 @@ struct EntriesTab: View {
         }
     }
 
+    @ViewBuilder
+    private var entriesSection: some View {
+        Section("Entries (\(competition.entries.count))") {
+            if competition.entries.isEmpty {
+                Text("No entries.").foregroundStyle(.secondary)
+            } else {
+                ForEach(sortedEntries) { entry in
+                    EntryRow(entry: entry)
+                }
+                .onDelete { offsets in
+                    guard competition.status == .setup else { return }
+                    removeEntries(at: offsets)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var addSection: some View {
+        if competition.status == .setup {
+            Section {
+                Button("Add players…") { showAddPlayer = true }
+            }
+        }
+    }
+
     private func removeEntries(at offsets: IndexSet) {
         let sorted = sortedEntries
         for index in offsets {
             modelContext.delete(sorted[index])
+        }
+    }
+}
+
+struct EntryRow: View {
+    let entry: Entry
+
+    var body: some View {
+        HStack {
+            Text(entry.playerName)
+            Spacer()
+            if let assigned = entry.assignedName {
+                Text(assigned)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if entry.isDrawn {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
         }
     }
 }
@@ -192,68 +232,79 @@ struct DrawTab: View {
 
     private var spinOptions: [String] {
         guard let pool = competition.pool else { return [] }
-        if pool.type == .racing {
-            return pool.runners.map(\.name)
-        } else {
-            return pool.teams.map(\.name)
-        }
+        return pool.type == .racing ? pool.runners.map(\.name) : pool.teams.map(\.name)
+    }
+
+    private var canSpin: Bool {
+        competition.status == .active && !spinOptions.isEmpty
     }
 
     var body: some View {
         List {
-            if competition.status != .active {
-                Section {
-                    Label("Set competition to Active to draw entries.", systemImage: "info.circle")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                }
-            }
-            if !undrawnEntries.isEmpty {
-                Section("To draw (\(undrawnEntries.count))") {
-                    ForEach(undrawnEntries) { entry in
-                        HStack {
-                            Text(entry.playerName)
-                            Spacer()
-                            if competition.status == .active && !spinOptions.isEmpty {
-                                Button("Spin") { spinEntry = entry }
-                                    .buttonStyle(.borderedProminent)
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                }
-            }
-            if !drawnEntries.isEmpty {
-                Section("Drawn (\(drawnEntries.count))") {
-                    ForEach(drawnEntries) { entry in
-                        HStack {
-                            Text(entry.playerName)
-                            Spacer()
-                            Text(entry.assignedName ?? "—")
-                                .foregroundStyle(.secondary)
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                    }
-                }
-            }
-            if competition.entries.isEmpty {
-                ContentUnavailableView(
-                    "No Entries",
-                    systemImage: "person.2",
-                    description: Text("Add entries in the Entries tab.")
-                )
-            }
+            inactiveNotice
+            undrawnSection
+            drawnSection
+            emptyNotice
         }
         .listStyle(.insetGrouped)
         .sheet(item: $spinEntry) { entry in
-            SpinScreenView(
-                entry: entry,
-                options: spinOptions
-            ) { assignedName in
-                assign(entry: entry, name: assignedName)
+            SpinScreenView(entry: entry, options: spinOptions) { name in
+                assign(entry: entry, name: name)
             }
             .presentationDetents([.large])
+        }
+    }
+
+    @ViewBuilder
+    private var inactiveNotice: some View {
+        if competition.status != .active {
+            Section {
+                Label("Set competition to Active to draw entries.", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var undrawnSection: some View {
+        if !undrawnEntries.isEmpty {
+            Section("To draw (\(undrawnEntries.count))") {
+                ForEach(undrawnEntries) { entry in
+                    DrawEntryRow(entry: entry, canSpin: canSpin) {
+                        spinEntry = entry
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var drawnSection: some View {
+        if !drawnEntries.isEmpty {
+            Section("Drawn (\(drawnEntries.count))") {
+                ForEach(drawnEntries) { entry in
+                    HStack {
+                        Text(entry.playerName)
+                        Spacer()
+                        Text(entry.assignedName ?? "—")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyNotice: some View {
+        if competition.entries.isEmpty {
+            ContentUnavailableView(
+                "No Entries",
+                systemImage: "person.2",
+                description: Text("Add entries in the Entries tab.")
+            )
         }
     }
 
@@ -268,19 +319,36 @@ struct DrawTab: View {
     }
 }
 
+struct DrawEntryRow: View {
+    let entry: Entry
+    let canSpin: Bool
+    let onSpin: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(entry.playerName)
+            Spacer()
+            if canSpin {
+                Button("Spin", action: onSpin)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+    }
+}
+
 // MARK: - Results
 
 struct ResultsTab: View {
     @Bindable var competition: Competition
     @Environment(\.modelContext) private var modelContext
     @State private var editingResult: CompetitionResult?
-    @State private var showAddResult = false
 
     private var sortedPositions: [PrizePosition] {
         competition.prizePositions.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private func result(for position: PrizePosition) -> CompetitionResult? {
+    private func existingResult(for position: PrizePosition) -> CompetitionResult? {
         competition.results.first { $0.prizePosition?.id == position.id }
     }
 
@@ -291,36 +359,18 @@ struct ResultsTab: View {
                     Text("No prize positions defined.").foregroundStyle(.secondary)
                 } else {
                     ForEach(sortedPositions) { pos in
-                        let res = result(for: pos)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(pos.label).font(.headline)
-                                Spacer()
-                                if let assigned = res?.assignedName {
-                                    Text(assigned).foregroundStyle(.secondary)
-                                } else {
-                                    Text("—").foregroundStyle(.tertiary)
-                                }
-                                if competition.status != .complete {
-                                    Button(res == nil ? "Assign" : "Edit") {
-                                        if let res { editingResult = res }
-                                        else { createAndEdit(position: pos) }
-                                    }
-                                    .font(.caption)
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.mini)
-                                }
-                            }
-                            if let res {
-                                let winners = res.winners(in: competition.entries)
-                                if !winners.isEmpty {
-                                    Text(winners.map(\.playerName).joined(separator: ", "))
-                                        .font(.caption)
-                                        .foregroundStyle(.green)
-                                }
+                        ResultPositionRow(
+                            position: pos,
+                            result: existingResult(for: pos),
+                            entries: competition.entries,
+                            canEdit: competition.status != .complete
+                        ) {
+                            if let res = existingResult(for: pos) {
+                                editingResult = res
+                            } else {
+                                createAndEdit(position: pos)
                             }
                         }
-                        .padding(.vertical, 2)
                     }
                 }
             }
@@ -336,6 +386,49 @@ struct ResultsTab: View {
         modelContext.insert(result)
         competition.results.append(result)
         editingResult = result
+    }
+}
+
+struct ResultPositionRow: View {
+    let position: PrizePosition
+    let result: CompetitionResult?
+    let entries: [Entry]
+    let canEdit: Bool
+    let onEdit: () -> Void
+
+    private var winners: [Entry] {
+        result?.winners(in: entries) ?? []
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(position.label).font(.headline)
+                Spacer()
+                assignedLabel
+                if canEdit {
+                    Button(result == nil ? "Assign" : "Edit", action: onEdit)
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+            }
+            if !winners.isEmpty {
+                Text(winners.map(\.playerName).joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var assignedLabel: some View {
+        if let name = result?.assignedName {
+            Text(name).foregroundStyle(.secondary)
+        } else {
+            Text("—").foregroundStyle(.tertiary)
+        }
     }
 }
 

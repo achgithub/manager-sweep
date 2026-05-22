@@ -56,7 +56,10 @@ struct TeamsPanel: View {
                     ForEach(sortedTeams) { team in
                         Text(team.name)
                     }
-                    .onDelete(perform: pool.status == .setup ? deleteTeams : nil)
+                    .onDelete { offsets in
+                        guard pool.status == .setup else { return }
+                        deleteTeams(at: offsets)
+                    }
                 }
             }
         }
