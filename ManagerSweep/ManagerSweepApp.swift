@@ -12,7 +12,18 @@ import SwiftData
 struct ManagerSweepApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Pool.self,
+            Runner.self,
+            Team.self,
+            TournamentGroup.self,
+            GroupMatch.self,
+            KnockoutStage.self,
+            KnockoutMatch.self,
+            Competition.self,
+            PrizePosition.self,
+            Player.self,
+            Entry.self,
+            CompetitionResult.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
